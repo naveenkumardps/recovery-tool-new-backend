@@ -67,16 +67,14 @@ def _iso(dt: Any) -> str | None:
     return str(dt)
 
 
-def _sanitize_features_for_client(feat: Any, *, hide_modules: bool) -> dict[str, Any]:
-    """Drop payment-provider internals and optional module matrix from API responses."""
+def _sanitize_features_for_client(feat: Any) -> dict[str, Any]:
+    """Drop payment-provider internals from plan `features` (keep `modules` for pricing / portal)."""
     if not isinstance(feat, dict):
         return {}
     out: dict[str, Any] = {}
     for k, v in feat.items():
         lk = str(k).lower()
         if lk.startswith("razorpay"):
-            continue
-        if hide_modules and lk == "modules":
             continue
         out[k] = v
     return out
@@ -89,11 +87,8 @@ def _serialize_plan_row(
 ) -> dict[str, Any]:
     feat = r.get("features")
     feat_raw: dict[str, Any] = feat if isinstance(feat, dict) else {}
-    feat_obj = (
-        _sanitize_features_for_client(feat_raw, hide_modules=public)
-        if public
-        else feat_raw
-    )
+    # Public plans omit Razorpay_* keys but keep `modules` so pricing / portal can list inclusions.
+    feat_obj = _sanitize_features_for_client(feat_raw) if public else feat_raw
     base: dict[str, Any] = {
         "id": r["id"],
         "name": r["name"],
