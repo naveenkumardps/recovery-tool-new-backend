@@ -1327,8 +1327,11 @@ async def my_transactions(sb: SbDep, user_id: UserIdDep):
 
 
 @app.get("/api/public/modules")
-async def public_list_modules(sb: SbDep):
-    """Module catalog for browsers without a session (marketing / pricing UI). Same payload as GET /api/modules."""
+async def public_list_modules(sb: SbServiceDep):
+    """Module catalog for browsers without a session (marketing / pricing UI). Same payload as GET /api/modules.
+
+    Uses SbServiceDep (not SbDep): SbDep injects TokenDep and would return 401 missing_bearer_token without Authorization.
+    """
     return await safe_execute(
         sb.table("module_catalog")
         .select("id,name,description,sort_order")
