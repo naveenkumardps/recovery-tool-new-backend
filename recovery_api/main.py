@@ -276,7 +276,8 @@ PLAN_COLS = (
 
 
 @app.get("/api/plans/active")
-async def list_active_plans(sb: SbDep):
+async def list_active_plans(sb: SbServiceDep):
+    # SbServiceDep: server reads DB without caller JWT (SbDep requires bearer token).
     rows = await safe_execute(
         sb.table("subscription_plans")
         .select(PLAN_COLS)
@@ -288,7 +289,7 @@ async def list_active_plans(sb: SbDep):
 
 # Public alias for marketing site (never requires Authorization header).
 @app.get("/api/public/plans/active")
-async def list_active_plans_public(sb: SbDep):
+async def list_active_plans_public(sb: SbServiceDep):
     rows = await safe_execute(
         sb.table("subscription_plans")
         .select(PLAN_COLS)
