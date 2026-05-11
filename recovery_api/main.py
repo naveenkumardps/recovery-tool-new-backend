@@ -365,7 +365,7 @@ async def admin_upsert_plan(body: PlanUpsertBody, sb: SbDep, user_id: UserIdDep)
                                     "name": str(r.get("name") or r.get("id")),
                                     "amount": amount,
                                     "currency": "INR",
-                                    "description": f"RecoverVault plan {r.get('id')}",
+                                    "description": f"DocFusion plan {r.get('id')}",
                                 },
                                 "notes": {"plan_id": str(r.get("id"))},
                             }
@@ -515,7 +515,7 @@ async def create_razorpay_subscription(  # kept path for compatibility
                         "name": str(plan.get("id") or body.plan_id),
                         "amount": amount,
                         "currency": "INR",
-                        "description": f"RecoverVault plan {body.plan_id}",
+                        "description": f"DocFusion plan {body.plan_id}",
                     },
                     "notes": {"plan_id": body.plan_id},
                 }
