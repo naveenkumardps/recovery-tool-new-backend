@@ -276,8 +276,7 @@ PLAN_COLS = (
 
 
 @app.get("/api/plans/active")
-async def list_active_plans(sb: SbDep, user_id: UserIdDep):
-    _ = user_id
+async def list_active_plans(sb: SbDep):
     rows = await safe_execute(
         sb.table("subscription_plans")
         .select(PLAN_COLS)
