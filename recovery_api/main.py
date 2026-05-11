@@ -67,10 +67,34 @@ def _iso(dt: Any) -> str | None:
     return str(dt)
 
 
-def _serialize_plan_row(r: dict[str, Any]) -> dict[str, Any]:
+def _sanitize_features_for_client(feat: Any, *, hide_modules: bool) -> dict[str, Any]:
+    """Drop payment-provider internals and optional module matrix from API responses."""
+    if not isinstance(feat, dict):
+        return {}
+    out: dict[str, Any] = {}
+    for k, v in feat.items():
+        lk = str(k).lower()
+        if lk.startswith("razorpay"):
+            continue
+        if hide_modules and lk == "modules":
+            continue
+        out[k] = v
+    return out
+
+
+def _serialize_plan_row(
+    r: dict[str, Any],
+    *,
+    public: bool = False,
+) -> dict[str, Any]:
     feat = r.get("features")
-    feat_obj: dict[str, Any] = feat if isinstance(feat, dict) else {}
-    return {
+    feat_raw: dict[str, Any] = feat if isinstance(feat, dict) else {}
+    feat_obj = (
+        _sanitize_features_for_client(feat_raw, hide_modules=public)
+        if public
+        else feat_raw
+    )
+    base: dict[str, Any] = {
         "id": r["id"],
         "name": r["name"],
         "price_inr_paise": int(r["price_inr_paise"]),
@@ -81,6 +105,20 @@ def _serialize_plan_row(r: dict[str, Any]) -> dict[str, Any]:
         "active": bool(r["active"]),
         "created_at": _iso(r.get("created_at")),
     }
+    if public:
+        q = int(r["monthly_recovery_quota_mb"])
+        d = int(r["max_devices"])
+        base["highlights"] = {
+            "devices": d,
+            "devices_label": "1 device" if d == 1 else f"Up to {d} devices",
+            "monthly_recovery_quota_mb": q,
+            "monthly_recovery_label": (
+                "No monthly cap"
+                if q <= 0
+                else ("Unlimited monthly recovery" if q >= 999_999 else f"{q:,} MB recovery / month")
+            ),
+        }
+    return base
 
 
 def _features_modules(feat: Any) -> dict[str, bool]:
@@ -284,7 +322,7 @@ async def list_active_plans(sb: SbServiceDep):
         .eq("active", True)
         .order("price_inr_paise")
     )
-    return [_serialize_plan_row(r) for r in rows]
+    return [_serialize_plan_row(r, public=True) for r in rows]
 
 
 # Public alias for marketing site (never requires Authorization header).
@@ -296,7 +334,7 @@ async def list_active_plans_public(sb: SbServiceDep):
         .eq("active", True)
         .order("price_inr_paise")
     )
-    return [_serialize_plan_row(r) for r in rows]
+    return [_serialize_plan_row(r, public=True) for r in rows]
 
 
 @app.get("/api/admin/plans")
