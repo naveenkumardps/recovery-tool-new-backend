@@ -77,7 +77,14 @@ class Settings(BaseSettings):
         "http://localhost:5173,http://localhost:5174,"
         "http://127.0.0.1:8080,http://localhost:8080,"
         "http://127.0.0.1:3000,http://localhost:3000,"
+        "https://docfusion.in,"
         "https://tauri.localhost,http://tauri.localhost"
+    )
+    # If set, origins matching this regex may call the API (in addition to allowed_origins).
+    # Default allows any *.vercel.app HTTPS preview/production URL; override with CORS_ORIGIN_REGEX="" to disable.
+    cors_origin_regex: str = Field(
+        default=r"https://.*\.vercel\.app",
+        validation_alias=AliasChoices("CORS_ORIGIN_REGEX", "cors_origin_regex"),
     )
 
 

@@ -29,9 +29,11 @@ log = logging.getLogger("recovery_api")
 
 app = FastAPI(title="Recovery API", version="0.4.0")
 
+_cors_regex = (settings.cors_origin_regex or "").strip()
 app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_origins_list(settings),
+    allow_origin_regex=_cors_regex or None,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
