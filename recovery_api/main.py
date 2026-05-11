@@ -286,6 +286,18 @@ async def list_active_plans(sb: SbDep):
     return [_serialize_plan_row(r) for r in rows]
 
 
+# Public alias for marketing site (never requires Authorization header).
+@app.get("/api/public/plans/active")
+async def list_active_plans_public(sb: SbDep):
+    rows = await safe_execute(
+        sb.table("subscription_plans")
+        .select(PLAN_COLS)
+        .eq("active", True)
+        .order("price_inr_paise")
+    )
+    return [_serialize_plan_row(r) for r in rows]
+
+
 @app.get("/api/admin/plans")
 async def admin_list_plans(sb: SbDep, user_id: UserIdDep):
     await _require_admin(sb, user_id)
