@@ -81,9 +81,15 @@ class Settings(BaseSettings):
         "https://tauri.localhost,http://tauri.localhost"
     )
     # If set, origins matching this regex may call the API (in addition to allowed_origins).
-    # Default allows any *.vercel.app HTTPS preview/production URL; override with CORS_ORIGIN_REGEX="" to disable.
+    # Default: Vercel previews + localhost + private LAN (RFC1918) for dev e.g. http://192.168.1.7:8080.
+    # Set CORS_ORIGIN_REGEX="" on a locked-down deployment to disable regex matching.
     cors_origin_regex: str = Field(
-        default=r"https://.*\.vercel\.app",
+        default=(
+            r"https://.*\.vercel\.app|"
+            r"https?://(localhost|127\.0\.0\.1)(:\d+)?|"
+            r"https?://(10\.\d{1,3}\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3}|"
+            r"172\.(1[6-9]|2[0-9]|3[0-1])\.\d{1,3}\.\d{1,3})(:\d+)?"
+        ),
         validation_alias=AliasChoices("CORS_ORIGIN_REGEX", "cors_origin_regex"),
     )
 

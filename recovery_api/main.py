@@ -1326,6 +1326,17 @@ async def my_transactions(sb: SbDep, user_id: UserIdDep):
 # ---------------------------------------------------------------------------
 
 
+@app.get("/api/public/modules")
+async def public_list_modules(sb: SbDep):
+    """Module catalog for browsers without a session (marketing / pricing UI). Same payload as GET /api/modules."""
+    return await safe_execute(
+        sb.table("module_catalog")
+        .select("id,name,description,sort_order")
+        .order("sort_order")
+        .order("name")
+    )
+
+
 @app.get("/api/modules")
 async def list_modules(sb: SbDep, user_id: UserIdDep):
     _ = user_id
