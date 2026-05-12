@@ -1,12 +1,19 @@
+import logging
+from uuid import UUID
+
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from recovery_api.supabase_http import (
     SbAnonDep,
+    SbServiceDep,
     auth_password_grant,
     auth_refresh_session,
     auth_signup,
+    ensure_default_subscription,
 )
+
+log = logging.getLogger("recovery_api.auth")
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -33,7 +40,7 @@ def _normalize_email(email: str) -> str:
 
 
 @router.post("/register", response_model=TokenOut)
-async def register(body: RegisterBody, sb: SbAnonDep):
+async def register(body: RegisterBody, sb: SbAnonDep, sb_service: SbServiceDep):
     email = _normalize_email(body.email)
     if not email:
         raise HTTPException(status_code=400, detail="invalid_email")
@@ -45,6 +52,18 @@ async def register(body: RegisterBody, sb: SbAnonDep):
         # When email-confirmation is enabled, signup can succeed without an
         # immediate session. Surface a clear error so the client can prompt.
         raise HTTPException(status_code=400, detail="signup_requires_confirmation")
+
+    # Attach the user to the Free plan by default. Best-effort: any failure here
+    # must not break signup itself — the GET /api/me/subscriptions backstop will
+    # heal the account on first dashboard load.
+    user_payload = out.get("user") or {}
+    user_id_raw = user_payload.get("id") if isinstance(user_payload, dict) else None
+    if user_id_raw:
+        try:
+            await ensure_default_subscription(sb_service, UUID(str(user_id_raw)))
+        except Exception:  # noqa: BLE001
+            log.exception("register: failed to attach default free plan user=%s", user_id_raw)
+
     return TokenOut(access_token=token, refresh_token=out.get("refresh_token"))
 
 

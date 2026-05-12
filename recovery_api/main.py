@@ -22,7 +22,13 @@ from recovery_api.razorpay_client import (
     verify_order_payment_signature as rz_verify_order_payment_signature,
 )
 from recovery_api.routers.auth import router as auth_router
-from recovery_api.supabase_http import SbDep, SbServiceDep, count_rows, safe_execute
+from recovery_api.supabase_http import (
+    SbDep,
+    SbServiceDep,
+    count_rows,
+    ensure_default_subscription,
+    safe_execute,
+)
 
 settings = get_settings()
 log = logging.getLogger("recovery_api")
@@ -522,10 +528,6 @@ class CreateRazorpayCheckoutOut(BaseModel):
 async def create_razorpay_subscription(  # kept path for compatibility
     body: CreateRazorpaySubscriptionBody, sb: SbDep, user_id: UserIdDep
 ):
-    # Require Razorpay config in server env.
-    if not settings.razorpay_key_id or not settings.razorpay_key_secret:
-        raise HTTPException(status_code=500, detail="razorpay_not_configured")
-
     plans = await safe_execute(
         sb.table("subscription_plans")
         .select("id,billing_period,active,features,price_inr_paise")
@@ -538,6 +540,41 @@ async def create_razorpay_subscription(  # kept path for compatibility
 
     plan = plans[0]
     bp = str(plan.get("billing_period") or "")
+    amount = int(plan.get("price_inr_paise") or 0)
+
+    # Free (zero-priced) plans skip Razorpay entirely — activate locally so the
+    # default plan, lifetime-free tiers, and any future ₹0 promos all just work
+    # regardless of `billing_period`.
+    if amount <= 0:
+        already = await safe_execute(
+            sb.table("subscriptions")
+            .select("id")
+            .eq("user_id", str(user_id))
+            .eq("plan_id", body.plan_id)
+            .eq("status", "active")
+            .limit(1)
+        )
+        if not already:
+            now = datetime.now(timezone.utc)
+            row: dict[str, Any] = {
+                "user_id": str(user_id),
+                "plan_id": body.plan_id,
+                "status": "active",
+                "current_period_start": now.isoformat(),
+                "cancel_at_period_end": False,
+            }
+            await safe_execute(
+                sb.table("subscriptions").insert(row),
+                error_detail="supabase_insert_failed",
+            )
+        return CreateRazorpayCheckoutOut(
+            plan_id=body.plan_id, mode="free", amount_paise=0, currency="INR"
+        )
+
+    # Paid plans need Razorpay credentials and a recurring billing period.
+    if not settings.razorpay_key_id or not settings.razorpay_key_secret:
+        raise HTTPException(status_code=500, detail="razorpay_not_configured")
+
     if bp not in ("monthly", "yearly"):
         raise HTTPException(status_code=400, detail="plan_not_subscribable")
 
@@ -586,23 +623,8 @@ async def create_razorpay_subscription(  # kept path for compatibility
             raise HTTPException(status_code=502, detail="razorpay_plan_create_failed") from exc
 
     # Test-mode fallback: Razorpay subscriptions often fail in test accounts due to mandates.
+    # (Free plans were already returned above, so `amount` here is always > 0.)
     if settings.razorpay_key_id.startswith("rzp_test_"):
-        amount = int(plan.get("price_inr_paise") or 0)
-        if amount <= 0:
-            # Free plan / 0-priced plan: activate locally without payment.
-            now = datetime.now(timezone.utc)
-            row: dict[str, Any] = {
-                "user_id": str(user_id),
-                "plan_id": body.plan_id,
-                "status": "active",
-                "current_period_start": now.isoformat(),
-                "cancel_at_period_end": False,
-            }
-            await safe_execute(
-                sb.table("subscriptions").insert(row),
-                error_detail="supabase_insert_failed",
-            )
-            return CreateRazorpayCheckoutOut(plan_id=body.plan_id, mode="free", amount_paise=0, currency="INR")
         try:
             rz_order = await rz_create_order(
                 {
@@ -1149,6 +1171,12 @@ async def razorpay_webhook(
 
 @app.get("/api/me/subscriptions")
 async def my_subscriptions(sb: SbDep, user_id: UserIdDep):
+    # Backstop for accounts created before auto-provisioning of the default plan:
+    # ensures every authenticated user lands on the free plan instead of "no plan".
+    try:
+        await ensure_default_subscription(sb, user_id)
+    except Exception:  # noqa: BLE001
+        log.exception("ensure_default_subscription: failed for user=%s", user_id)
     return await safe_execute(
         sb.table("subscriptions")
         .select("id,plan_id,status,current_period_start,current_period_end,created_at")

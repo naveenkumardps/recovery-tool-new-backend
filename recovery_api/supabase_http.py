@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timezone
 from typing import Annotated, Any
+from uuid import UUID
 
 from fastapi import Depends, HTTPException
 from supabase import AsyncClient, acreate_client
@@ -155,3 +157,70 @@ async def safe_execute(query: Any, *, error_detail: str = "supabase_query_failed
         log.exception("supabase_query_failed detail=%s", error_detail)
         raise HTTPException(status_code=502, detail=f"{error_detail}: {exc}") from exc
     return _unwrap(res)
+
+
+async def ensure_default_subscription(sb: AsyncClient, user_id: UUID) -> str | None:
+    """
+    Make sure every user has an active subscription by attaching them to the
+    cheapest free (price 0) active plan when they have none.
+
+    Returns the plan_id of the resulting (existing or just-created) active
+    subscription, or None when no free plan exists in `subscription_plans`.
+
+    Designed to be idempotent and safe to call lazily from any authenticated
+    endpoint — it inserts only when there is no active subscription on file.
+    """
+    existing = await safe_execute(
+        sb.table("subscriptions")
+        .select("id,plan_id")
+        .eq("user_id", str(user_id))
+        .eq("status", "active")
+        .limit(1)
+    )
+    if existing:
+        pid = existing[0].get("plan_id")
+        return str(pid) if pid is not None else None
+
+    free_plans = await safe_execute(
+        sb.table("subscription_plans")
+        .select("id,price_inr_paise")
+        .eq("active", True)
+        .eq("price_inr_paise", 0)
+        .order("created_at")
+        .limit(1)
+    )
+    if not free_plans:
+        return None
+
+    plan_id = str(free_plans[0].get("id") or "").strip()
+    if not plan_id:
+        return None
+
+    now = datetime.now(timezone.utc)
+    row: dict[str, Any] = {
+        "user_id": str(user_id),
+        "plan_id": plan_id,
+        "status": "active",
+        "current_period_start": now.isoformat(),
+        "cancel_at_period_end": False,
+    }
+    try:
+        await safe_execute(
+            sb.table("subscriptions").insert(row),
+            error_detail="supabase_insert_failed",
+        )
+    except HTTPException:
+        # Race condition (another request just inserted one) is fine — confirm and
+        # return whatever's now active.
+        again = await safe_execute(
+            sb.table("subscriptions")
+            .select("plan_id")
+            .eq("user_id", str(user_id))
+            .eq("status", "active")
+            .limit(1)
+        )
+        if again:
+            pid = again[0].get("plan_id")
+            return str(pid) if pid is not None else None
+        raise
+    return plan_id
